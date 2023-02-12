@@ -32,10 +32,22 @@ libsources   = $(wildcard $(1)/*.c) $(subst $(OS_class)/,,$(wildcard $(1)/$(OS_c
 libobjects   = $(foreach SOURCE,$(call libsources,$(1)),$(patsubst $(1)/%.c,$(1)/$(DST.dir)/%$(EXT.obj),$(SOURCE)))
 DST.obj      = $(foreach PACKAGE,$(ALL_LIBRARIES),$(call libobjects,$(COM.dir)/lib-$(PACKAGE)))
 
+# Default to not including tap. Embed tap in libsxe if MAK_VERSION is defined and is 1
+
+MAK_VERSION ?= 2
+
+ifeq ($(MAK_VERSION),1)
+SXE_EMBEDDED_TAP = 1
+endif
+
 # If tap is not external, add it to the list of objects to go in libsxe
 
-TAP.src      = $(if $(SXE_EXTERNAL_TAP),,$(wildcard $(COM.dir)/lib-tap/tap/*.c))
+ifdef SXE_EMBEDDED_TAP
+TAP.src      = $(wildcard $(COM.dir)/lib-tap/tap/*.c)
 DST.obj     += $(patsubst $(COM.dir)/lib-tap/tap/%.c,$(COM.dir)/lib-tap/$(DST.dir)/%$(EXT.obj),$(TAP.src))
+endif
+
+SXE_DISABLE_OPENSSL=1    # Don't build in SSL support
 
 # Add the objects from libev
 
@@ -82,7 +94,7 @@ ifneq ($(PREFIX),)
 	cp -r           $(TOP.dir)/mak     $(PREFIX)/
 	mkdir -p                           $(PREFIX)/libsxe
 	cp -r           build-linux*       $(PREFIX)/libsxe
-ifndef SXE_EXTERNAL_TAP
+ifdef SXE_EMBEDDED_TAP
 	mkdir -p                           $(PREFIX)/libsxe/lib-tap
 	cp --parents -r lib-tap/build*/*.h $(PREFIX)/libsxe/
 endif

@@ -8,10 +8,12 @@
 #include "sxe-alloc.h"
 #include "sxe-jitson.h"
 #include "sxe-test-memory.h"
+#include "sxe-thread.h"
 
 int
 main(void)
 {
+    struct sxe_jitson_source source;
     struct sxe_jitson_stack *stack;
     struct sxe_jitson       *clone, *jitson;      // Constructed jitson values are returned as non-const
     const struct sxe_jitson *element, *member;    // Accessed jitson values are returned as const
@@ -19,7 +21,7 @@ main(void)
     size_t                   len;
     uint64_t                 start_allocations;
 
-    plan_tests(259);
+    plan_tests(308);
     start_allocations     = sxe_allocations;
     sxe_alloc_diagnostics = true;
 
@@ -30,8 +32,11 @@ main(void)
     diag("Memory allocation failure tests");
     {
         MOCKFAIL_START_TESTS(1, MOCK_FAIL_STACK_NEW_OBJECT);
-        is(sxe_jitson_new("0"), NULL, "Failed to allocate the thread stack object");
+        is(sxe_jitson_stack_new(1), NULL, "Failed to allocate a stack object");
         MOCKFAIL_END_TESTS();
+
+        ok(stack = sxe_jitson_stack_new(1), "Allocated a non-thread stack");
+        sxe_jitson_stack_free(stack);
 
         MOCKFAIL_START_TESTS(1, MOCK_FAIL_STACK_NEW_JITSONS);
         is(sxe_jitson_new("0"), NULL, "Failed to allocate the thread stack's initial jitsons");
@@ -62,11 +67,12 @@ main(void)
          */
         stack = sxe_jitson_stack_get_thread();
 
-        MOCKFAIL_START_TESTS(6, MOCK_FAIL_STACK_EXPAND);
+        MOCKFAIL_START_TESTS(7, MOCK_FAIL_STACK_EXPAND);
         ok(sxe_jitson_stack_open_collection(stack, SXE_JITSON_TYPE_ARRAY), "Opened an array on the stack");
         ok(!sxe_jitson_stack_add_null(stack),              "Failed to realloc to add null to an open array");
         ok(!sxe_jitson_stack_add_bool(stack, true),        "Failed to realloc to add true to an open array");
         ok(!sxe_jitson_stack_add_number(stack, 0.0),       "Failed to realloc to add 0.0 to an open array");
+        ok(!sxe_jitson_stack_add_uint(stack, 0),           "Failed to realloc to add 0 to an open array");
         ok(!sxe_jitson_stack_add_reference(stack, jitson), "Failed to realloc to add a reference to an open array");
         ok(!sxe_jitson_stack_add_dup(stack, jitson),       "Failed to realloc to add a duplicate to an open array");
         sxe_jitson_stack_clear(stack);
@@ -116,6 +122,15 @@ main(void)
         is(sxe_jitson_get_type(jitson), SXE_JITSON_TYPE_NUMBER, "0xDEADBEEF' is a number");
         is(sxe_jitson_get_uint(jitson), 0xDEADBEEF,             "0x%"PRIx64" == 0xDEADBEEF", sxe_jitson_get_uint(jitson));
         is(sxe_jitson_get_number(jitson), (double)0xDEADBEEF,   "%f == (double)0xDEADBEEF", sxe_jitson_get_number(jitson));
+        is_eq(json_out = sxe_jitson_to_json(jitson, NULL), "3735928559", "0xDEADBEEF is 3735928559 in decimal");
+        sxe_free(json_out);
+        sxe_jitson_free(jitson);
+
+        sxe_jitson_source_from_string(&source, "0xDEADBEEF", SXE_JITSON_FLAG_STRICT);
+        ok(sxe_jitson_stack_load_json(stack, &source),          "Loaded '0xDEADBEEF' (error %s)", strerror(errno));
+        ok(jitson = sxe_jitson_stack_get_jitson(stack),         "Got the loaded value");
+        is(sxe_jitson_get_type(jitson), SXE_JITSON_TYPE_NUMBER, "0xDEADBEEF' is a number");
+        is(sxe_jitson_get_uint(jitson), 0,                      "0x* == 0 (hex not enabled due to strict mode)");
         sxe_jitson_free(jitson);
 
         ok(jitson = sxe_jitson_new("0xDEADBEEFDEADBEEF"),       "Parsed '0xDEADBEEFDEADBEEF' (error %s)", strerror(errno));
@@ -123,6 +138,9 @@ main(void)
         is(sxe_jitson_get_uint(jitson), 0xDEADBEEFDEADBEEF,     "0x%"PRIx64" == 0xDEADBEEFDEADBEEF", sxe_jitson_get_uint(jitson));
         ok(isnan(sxe_jitson_get_number(jitson)),                "%f == NAN", sxe_jitson_get_number(jitson));
         is(errno, EOVERFLOW,                                    "Error = %s", strerror(errno));
+        is_eq(json_out = sxe_jitson_to_json(jitson, NULL), "16045690984833335023",
+              "0xDEADBEEFDEADBEEF is 16045690984833335023 in decimal");
+        sxe_free(json_out);
         sxe_jitson_free(jitson);
         errno = 0;
 
@@ -192,22 +210,25 @@ main(void)
 
     diag("Test identifiers and parsing of terminals");
     {
-        char         test_id[2] = "\0";
-        const char * next;
-        int          i;
+        const char *ident;
+        int         i;
+        char        test_id[2] = "\0";
 
         for (i = -128; i <= 127; i++) {
             test_id[0] = (char)i;
-            next = sxe_jitson_parse_identifier(test_id);
+            sxe_jitson_source_from_string(&source, test_id, 0);
+            ident = sxe_jitson_source_get_identifier(&source, &len);
 
             if (i == '.' || i == '_' || (i >= '0' && i <= '9') || (i >= 'a' && i <= 'z') || (i >= 'A' && i <= 'Z')) {
-                if (next == test_id)
+                if (ident != test_id)
                     break;
-            } else if (next != test_id)
+            } else if (ident != NULL)
                 break;
         }
 
         is(i, 128, "All identifier characters are correctly classified");
+
+        is_eq(sxe_jitson_parse_identifier("@"), "@",          "Helper function returns non-identifier character");
 
         ok(jitson = sxe_jitson_new("true"),                   "Parsed 'true' (error %s)", strerror(errno));
         is(sxe_jitson_get_type(jitson), SXE_JITSON_TYPE_BOOL, "'true' is a boolean" );
@@ -242,6 +263,8 @@ main(void)
         ok(!sxe_jitson_new("fathead"),  "Failed to parse invalid token 'fathead' (error %s)",          strerror(errno));
         ok(!sxe_jitson_new("n"),        "Failed to parse invalid token 'n' (error %s)",                strerror(errno));
         ok(!sxe_jitson_new("twit"),     "Failed to parse invalid token 'twit' (error %s)",             strerror(errno));
+        ok(!sxe_jitson_new("-x"),       "Failed to parse invalid number '-x' (error %s)",              strerror(errno));
+        ok(!sxe_jitson_new("0xx"),      "Failed to parse invalid hex number '0xx' (error %s)",         strerror(errno));
 
         char json[65562];    // Big enough for an object with a > 64K member name
         json[len = 0] = '{';
@@ -297,12 +320,11 @@ main(void)
         is(5, sxe_jitson_len(clone),                              "Clone has 5 members too");
         ok(member  = sxe_jitson_object_get_member(clone, "c", 0), "One of the members is 'c'");
         ok(element = sxe_jitson_array_get_element(member, 1),     "Got second element of array member 'c'");
-        is(sxe_jitson_get_uint(element), 3,                       "It's the unsinged integer 3");
-        sxe_jitson_free(clone);
-
-        is_eq(json_out = sxe_jitson_to_json(jitson, NULL),
+        is(sxe_jitson_get_uint(element), 3,                       "It's the unsigned integer 3");
+        is_eq(json_out = sxe_jitson_to_json(clone, NULL),
               "{\"biglongname\":\"B\",\"a\":1,\"c\":[2,3],\"f\":true,\"d\":{\"e\":4}}",
               "Encoder spat out same JSON as we took in");
+        sxe_jitson_free(clone);
 
         is(sxe_jitson_size(jitson), 16, "Objects can be sized once indexed");
         sxe_jitson_free(jitson);
@@ -396,6 +418,27 @@ main(void)
         sxe_jitson_free(clone);
 
         sxe_jitson_free(jitson);
+
+        // Test bug found by Dejan in DPT-1422 (more than one unicode escape sequence)
+        ok(jitson = sxe_jitson_new("\"\\u000AONE\\u000ATWO\""),  "Parsed '\"\\u000AONE\\u000ATWO\"' (error %s)", strerror(errno));
+        is(sxe_jitson_get_type(jitson), SXE_JITSON_TYPE_STRING,  "'\"\\u000AONE\\u000ATWO\"' is a string");
+        is_eq(sxe_jitson_get_string(jitson, NULL), "\nONE\nTWO", "Correct UTF-8 value");
+        sxe_jitson_free(jitson);
+
+        // Test DPT-1702 (can't create a reference to an allocated reference)
+        struct sxe_jitson *ref;
+        ok(sxe_jitson_stack_open_collection(stack, SXE_JITSON_TYPE_ARRAY),       "Opened an array on the stack");
+        ok(sxe_jitson_stack_add_string(stack, "hello", SXE_JITSON_TYPE_IS_COPY), "Added \"hello\" to it");
+        sxe_jitson_stack_close_collection(stack);
+        ok(jitson = sxe_jitson_stack_get_jitson(stack),                          "Got the array from the stack");
+        ok(ref       = sxe_jitson_create_reference(jitson),                      "Created a reference to the JSON \"hello\"");
+        ok(clone     = sxe_jitson_create_reference(ref),                         "Created a clone of the reference");
+        ok(json_out  = sxe_jitson_to_json(clone, NULL),                          "Converted the cloned reference to JSON text");
+        is_eq(json_out, "[\"hello\"]",                                           "It's '[\"hello\"]'");
+        sxe_free(json_out);
+        sxe_jitson_free(clone);
+        sxe_jitson_free(ref);
+        sxe_jitson_free(jitson);
     }
 
     diag("Test simple construction");
@@ -436,10 +479,19 @@ main(void)
         is_eq(json_out = sxe_jitson_to_json(jitson, NULL), "{}",            "Look, it's an empty object");
         sxe_free(json_out);
 
-        ok(clone = sxe_jitson_dup(jitson),                         "Cloned an empty array");
-        is(sxe_jitson_get_type(clone), SXE_JITSON_TYPE_OBJECT,     "Clone is an '%s' (expected 'object')",
-           sxe_jitson_get_type_as_str(clone));
-        is(sxe_jitson_len(clone), 0,                               "Clone has 0 length (it is empty)");
+        ok(clone = sxe_jitson_dup(jitson),                     "Cloned an empty array");
+        is(sxe_jitson_get_type(clone), SXE_JITSON_TYPE_OBJECT, "Clone is an '%s' (expected 'object')",
+                                                               sxe_jitson_get_type_as_str(clone));
+        is(sxe_jitson_len(clone), 0,                           "Clone has 0 length (it is empty)");
+        sxe_jitson_free(clone);
+
+        ok(sxe_jitson_stack_open_collection(stack, SXE_JITSON_TYPE_OBJECT), "Opened another object on the stack");
+        ok(sxe_jitson_stack_add_dup_members(stack, jitson),                 "Added duplicates of members of the empty object");
+        ok(sxe_jitson_stack_add_member_number(stack, "pi", 3.14159),        "Added member 'pi'");
+        sxe_jitson_stack_close_collection(stack);
+        ok(clone = sxe_jitson_stack_get_jitson(stack),                      "Got the extended clone from the stack");
+        is(sxe_jitson_len(clone), 1,                                        "It has only 1 member");
+        ok(sxe_jitson_object_get_member(clone, "pi", sizeof("pi") - 1),     "It has the additional member");
         sxe_jitson_free(clone);
         sxe_jitson_free(jitson);
 
@@ -461,6 +513,19 @@ main(void)
               "{\"number\":1.14159,\"bool\":true,\"hello.world\":\"hello, world\",\"null\":null}", "Got the expected object");
         sxe_free(json_out);
 
+        ok(sxe_jitson_stack_open_collection(stack, SXE_JITSON_TYPE_OBJECT), "Opened another object on the stack");
+        ok(sxe_jitson_stack_add_dup_members(stack, jitson),                 "Added duplicates of members");
+        ok(sxe_jitson_stack_add_member_number(stack, "pi", 3.14159),        "Added member 'pi'");
+        sxe_jitson_stack_close_collection(stack);
+        ok(clone = sxe_jitson_stack_get_jitson(stack),                      "Got the extended clone from the stack");
+        ok(sxe_jitson_object_get_member(clone, "hello.world", 0),           "It has a member from the cloned object");
+        ok(sxe_jitson_object_get_member(clone, "pi", sizeof("pi") - 1),     "It has the additional member");
+        is_eq(json_out = sxe_jitson_to_json(clone, NULL),
+              "{\"bool\":true,\"pi\":3.14159,\"null\":null,\"hello.world\":\"hello, world\",\"number\":1.14159}",
+              "Got the expected object");
+        sxe_free(json_out);
+        sxe_jitson_free(clone);
+
         MOCKFAIL_START_TESTS(1, MOCK_FAIL_DUP);
         ok(!sxe_jitson_dup(jitson), "Can't duplicate an object if malloc fails");
         MOCKFAIL_END_TESTS();
@@ -470,6 +535,17 @@ main(void)
         MOCKFAIL_START_TESTS(1, MOCK_FAIL_STRING_CLONE);
         ok(!sxe_jitson_dup(jitson), "Can't clone an object that contains an owned string if strdup returns NULL");
         MOCKFAIL_END_TESTS();
+
+        stack = sxe_jitson_stack_get_thread();
+        stack->maximum = 1;    // Reset the initial maximum stack size to allow testing the following out of memory conditions
+        ok(sxe_jitson_stack_open_collection(stack, SXE_JITSON_TYPE_OBJECT), "Opened yet another object on the stack");
+        MOCKFAIL_START_TESTS(1, MOCK_FAIL_STACK_EXPAND);
+        ok(!sxe_jitson_stack_add_dup_members(stack, jitson), "Can't duplicate members if stack can't be expanded");
+        MOCKFAIL_END_TESTS();
+        MOCKFAIL_START_TESTS(1, MOCK_FAIL_STRING_CLONE);
+        ok(!sxe_jitson_stack_add_dup_members(stack, jitson), "Can't dup members that include an owned string if strdup fails");
+        MOCKFAIL_END_TESTS();
+        sxe_jitson_stack_clear(stack);
 
         sxe_jitson_free(jitson);
     }
@@ -495,7 +571,7 @@ main(void)
         ok(sxe_jitson_stack_add_string(stack, "longer than 23 characters", SXE_JITSON_TYPE_IS_COPY),
            "Added a copy of a long string needing more than 2 tokens");
         sxe_jitson_stack_close_collection(stack);
-        ok(jitson = sxe_jitson_stack_get_jitson(stack), "Got the array from the stack");
+        ok(jitson = sxe_jitson_stack_get_jitson(stack),    "Got the array from the stack");
         is_eq(json_out = sxe_jitson_to_json(jitson, NULL), "[\"shortly\",\"longerly\",\"longer than 23 characters\"]",
               "Got the expected JSON");
         sxe_free(json_out);
@@ -522,8 +598,8 @@ main(void)
         ok(sxe_jitson_stack_add_string(stack, "two",   SXE_JITSON_TYPE_IS_REF),             "Added a weak reference to a string");
         ok(sxe_jitson_stack_add_string(stack, sxe_strdup("three"), SXE_JITSON_TYPE_IS_OWN), "Strong (ownership) ref to a string");
         sxe_jitson_stack_close_collection(stack);
-        ok(jitson = sxe_jitson_stack_get_jitson(stack), "Got the array from the stack");
-        is(sxe_jitson_size(jitson), 4,                  "Array of 3 short strings is 4 jitsons");
+        ok(jitson = sxe_jitson_stack_get_jitson(stack),    "Got the array from the stack");
+        is(sxe_jitson_size(jitson), 4,                     "Array of 3 short strings is 4 jitsons");
 
         sxe_jitson_make_reference(reference, jitson);
         is(sxe_jitson_get_type(reference), SXE_JITSON_TYPE_ARRAY, "A reference to an array has type array");
@@ -560,8 +636,48 @@ main(void)
         sxe_jitson_free(jitson);
     }
 
-    sxe_jitson_stack_free_thread();
+    diag("Test the constants extension");
+    {
+        is(sxe_jitson_new("[NONE,BIT0,BIT1]"), NULL, "Failed to parsed an array containing unknown constants");
+
+        ok(sxe_jitson_stack_open_collection(  stack, SXE_JITSON_TYPE_OBJECT),        "Opened an object on the stack");
+        ok(sxe_jitson_stack_add_member_string(stack, "NAME", "two-jitson-value", 0), "Added a name to the object");
+        ok(sxe_jitson_stack_add_member_uint(  stack, "BIT0", 1),                     "Added a bit flag");
+        ok(sxe_jitson_stack_add_member_uint(  stack, "BIT1", 2),                     "Added another bit flag");
+        sxe_jitson_stack_close_collection(stack);
+        ok(jitson = sxe_jitson_stack_get_jitson(stack), "Got the object from the stack");
+        sxe_jitson_stack_init(jitson);
+
+        /* Test the failure case where a duplicated constant value is > 1 jitson and the allocation fails.
+         */
+        stack = sxe_jitson_stack_get_thread();
+        stack->maximum = 1;   // Set initial maximum back to 1
+        MOCKFAIL_START_TESTS(1, MOCK_FAIL_STACK_EXPAND);
+        MOCKFAIL_SET_FREQ(2);
+        is(sxe_jitson_new("[NAME,BIT0,BIT1]"), NULL, "Failed to parse constants on alloc failure");
+        MOCKFAIL_END_TESTS();
+
+        ok(jitson = sxe_jitson_new("[NAME,BIT0,BIT1]"),                                  "Parsed array containing constants");
+        is_eq(json_out = sxe_jitson_to_json(jitson, NULL), "[\"two-jitson-value\",1,2]", "Constants were correctly replaced");
+        sxe_free(json_out);
+        sxe_jitson_free(jitson);
+
+        is(sxe_jitson_new("bull"), NULL, "Failed to parse a 1st letter misspelling of a keyword");
+
+        sxe_jitson_source_from_string(&source, "[NAME,BIT0,BIT1]", SXE_JITSON_FLAG_STRICT);
+        is(sxe_jitson_stack_load_json(stack, &source), NULL, "Failed to parse constants due to strict mode");
+
+        sxe_jitson_stack_fini();
+    }
+
+    diag("Test a non-NUL terminated source");
+    {
+        sxe_jitson_source_from_buffer(&source, "{}", 1, SXE_JITSON_FLAG_STRICT);
+        ok(!sxe_jitson_stack_load_json(stack, &source), "Length is respected, truncating valid JSON to invalid");
+    }
+
     sxe_jitson_type_fini();
+    sxe_thread_memory_free(SXE_THREAD_MEMORY_ALL);
     is(sxe_allocations, start_allocations, "No memory was leaked");
 
     return exit_status();

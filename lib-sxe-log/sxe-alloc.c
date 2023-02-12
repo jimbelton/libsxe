@@ -75,9 +75,7 @@ sxe_memalign_default(size_t align, size_t size, const char *file, int line)
 
     char *result = memalign(align, size);    // CONVENTION EXCLUSION: glibc allocation calls are allowed, since this is the interface to them
 
-    if (result == NULL)
-        SXEA1(!sxe_alloc_assert_on_enomem, ": failed to allocate %zu bytes of %zu aligned memory", size, align);    /* COVERAGE EXCLUSION: Out of memory condition */
-
+    SXEA1(!sxe_alloc_assert_on_enomem || result, ": failed to allocate %zu bytes of %zu aligned memory", size, align);
     SXE_ALLOC_LOG("%s: %d: %p = sxe_memalign(%zu,%zu)", file, line, result, align, size);
     return result;
 }
@@ -97,16 +95,14 @@ sxe_realloc_default(void *memory, size_t size, const char *file, int line)
 
     void *result = realloc(memory, size);    // CONVENTION EXCLUSION: glibc allocation calls are allowed, since this is the interface to them
 
-    if (result == NULL && (size || memory == NULL))
-        SXEA1(!sxe_alloc_assert_on_enomem, ": failed to reallocate object to %zu bytes", size);    /* COVERAGE EXCLUSION: Out of memory condition */
-
+    SXEA1(!sxe_alloc_assert_on_enomem || result || size == 0, ": failed to reallocate object to %zu bytes", size);
     SXE_ALLOC_LOG("%s: %d: %p = sxe_realloc(%p, %zu)", file, line, result, memory, size);
     return result;
 }
 
 /* Default to the implementations in this file
  */
-void (*sxe_free)(    void *,         const char *, int) = sxe_free_default;
+void  (*sxe_free)(    void *,         const char *, int) = sxe_free_default;
 void *(*sxe_malloc)(  size_t,         const char *, int) = sxe_malloc_default;
 void *(*sxe_realloc)( void *, size_t, const char *, int) = sxe_realloc_default;
 void *(*sxe_memalign)(size_t, size_t, const char *, int) = sxe_memalign_default;

@@ -22,12 +22,13 @@
 #include <assert.h>
 #include <string.h>
 
+#include "murmurhash3.h"
+#include "sxe-alloc.h"
 #include "sxe-cdb-private.h"
 #include "sxe-log.h"
 #include "sxe-time.h"
 #include "sxe-util.h"
 #include "tap.h"
-#include "murmurhash3.h"
 
 #define TEST_SXE_CDB_PREPARE(KEY,NUM) sxe_cdb_prepare(KEY[NUM], KEY##_len[NUM])
 #define TEST_IS(HKV,KEY,KEY_LEN,VARIANT,SUB_VARIANT) \
@@ -139,7 +140,9 @@ main(void)
     uint8_t  header_len_5_key[KEY_HEADER_LEN_5_KEY_LEN_MAX]; /* 65535 bytes */
     uint8_t  header_len_8_key[KEY_HEADER_LEN_5_KEY_LEN_MAX + 1 /* 2^24 too big :-) */];
 
-    plan_tests(223);
+    plan_tests(224);
+    uint64_t start_allocations = sxe_allocations;
+    sxe_alloc_diagnostics      = true;
 
     /* tests for key count double double linked lists; different runaway variants test different linked list fine details :-) */
 
@@ -444,6 +447,8 @@ main(void)
     ok(sxe_cdb_instance_put_val(cdb_instance_with_limit, NULL, 0) != SXE_CDB_UID_NONE, "append header_len_5_key as expected // straddles     kvdata limit");
     is(sxe_cdb_instance_put_val(cdb_instance_with_limit, NULL, 0) ,  SXE_CDB_UID_NONE, "append header_len_5_key as expected // failed due to kvdata limit");
 
+    sxe_cdb_instance_destroy(cdb_instance_with_limit);
+
     /* tests for ensemble functionality */
 
     //debug putenv(SXE_CAST_NOCONST(char *, "SXE_LOG_LEVEL_LIBSXE_LIB_SXE_CDB=7")); /* Set to 5 to suppress sxe-cdb logging during test */
@@ -564,6 +569,8 @@ main(void)
         sxe_cdb_ensemble_destroy(cdb_ensemble);
     }
 
+    sxe_cdb_finalize_thread();
+    is(sxe_allocations, start_allocations, "No memory was leaked");
     return exit_status();
-} /* main() */
+}
 

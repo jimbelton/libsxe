@@ -25,6 +25,8 @@
 #ifndef __SXE_LOG_H__
 #define __SXE_LOG_H__
 
+#include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>    /* For __thread on Windows */
@@ -86,30 +88,33 @@ typedef bool      SXE_BOOL;
 #define SXE_TRUE  true
 
 typedef enum SXE_RETURN {
-    SXE_RETURN_OK = 0,
-    SXE_RETURN_EXPIRED_VALUE,
-    SXE_RETURN_NO_UNUSED_ELEMENTS,
-    SXE_RETURN_IN_PROGRESS,
-    SXE_RETURN_UNCATEGORIZED,
-    SXE_RETURN_END_OF_FILE,
-    SXE_RETURN_WARN_ALREADY_INITIALIZED,
-    SXE_RETURN_WARN_WOULD_BLOCK,
-    SXE_RETURN_WARN_ALREADY_CLOSED,
-    SXE_RETURN_ERROR_NOT_INITIALIZED,
-    SXE_RETURN_ERROR_ALLOC,
-    SXE_RETURN_ERROR_INTERNAL,
-    SXE_RETURN_ERROR_NO_CONNECTION,
-    SXE_RETURN_ERROR_ALREADY_CONNECTED,
-    SXE_RETURN_ERROR_INVALID_URI,
-    SXE_RETURN_ERROR_BAD_MESSAGE,
-    SXE_RETURN_ERROR_ADDRESS_IN_USE,
-    SXE_RETURN_ERROR_INTERRUPTED,
-    SXE_RETURN_ERROR_COMMAND_NOT_RUN,
-    SXE_RETURN_ERROR_LOCK_NOT_TAKEN,
-    SXE_RETURN_ERROR_INCORRECT_STATE,
-    SXE_RETURN_ERROR_TIMED_OUT,
-    SXE_RETURN_ERROR_WRITE_FAILED,
-    SXE_RETURN_INVALID_VALUE    /* This must be the last value. */
+    SXE_RETURN_OK                        = 0,
+    SXE_RETURN_NO_SUCH_PROCESS           = ESRCH,              //   3
+    SXE_RETURN_ERROR_INTERRUPTED         = EINTR,              //   4
+    SXE_RETURN_ERROR_WRITE_FAILED        = EIO,                //   5
+    SXE_RETURN_ERROR_COMMAND_NOT_RUN     = ENOEXEC,            //   8
+    SXE_RETURN_WARN_ALREADY_CLOSED       = EBADF,              //   9
+    SXE_RETURN_WARN_WOULD_BLOCK          = EAGAIN,             //  11
+    SXE_RETURN_ERROR_ALLOC               = ENOMEM,             //  12
+    SXE_RETURN_ERROR_INVALID             = EINVAL,             //  22
+    SXE_RETURN_OUT_OF_RANGE              = ERANGE,             //  34
+    SXE_RETURN_DEADLOCK_WOULD_OCCUR      = EDEADLK,            //  35
+    SXE_RETURN_ERROR_LOCK_NOT_TAKEN      = ENOLCK,             //  37
+    SXE_RETURN_END_OF_FILE               = ENODATA,            //  61
+    SXE_RETURN_ERROR_BAD_MESSAGE         = EBADMSG,            //  74
+    SXE_RETURN_ERROR_INCORRECT_STATE     = EBADFD,             //  77
+    SXE_RETURN_ERROR_ADDRESS_IN_USE      = EADDRINUSE,         //  98
+    SXE_RETURN_NO_UNUSED_ELEMENTS        = ENOBUFS,            // 105
+    SXE_RETURN_ERROR_ALREADY_CONNECTED   = EISCONN,            // 106
+    SXE_RETURN_ERROR_NO_CONNECTION       = ENOTCONN,           // 107
+    SXE_RETURN_ERROR_TIMED_OUT           = ETIMEDOUT,          // 110
+    SXE_RETURN_WARN_ALREADY_INITIALIZED  = EALREADY,           // 114
+    SXE_RETURN_IN_PROGRESS               = EINPROGRESS,        // 115
+    SXE_RETURN_ERROR_NOT_INITIALIZED     = EUCLEAN,            // 117
+    SXE_RETURN_UNCATEGORIZED             = EMEDIUMTYPE,        // 124
+    SXE_RETURN_EXPIRED_VALUE             = EKEYEXPIRED,        // 127
+    SXE_RETURN_ERROR_INTERNAL            = ENOTRECOVERABLE,    // 131
+    SXE_RETURN_INVALID_VALUE             = INT_MAX             // This must be the last value.
 } SXE_RETURN;
 
 /* Aliases for backward compatibility
@@ -117,6 +122,7 @@ typedef enum SXE_RETURN {
 #define SXE_RETURN_WARN_CACHE_DOUBLE_INITIALIZED SXE_RETURN_WARN_ALREADY_INITIALIZED
 #define SXE_RETURN_ERROR_BAD_MESSAGE_RECEIVED    SXE_RETURN_ERROR_BAD_MESSAGE
 #define SXE_RETURN_ERROR_CACHE_UNINITIALIZED     SXE_RETURN_ERROR_NOT_INITIALIZED
+#define SXE_RETURN_ERROR_INVALID_URI             SXE_RETURN_ERROR_INVALID
 
 /* Private type used to allow per file dynamic modification of log levels
  */

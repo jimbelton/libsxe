@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <string.h>
+#include <tap.h>
+
 #include "md5.h"
-#include "tap.h"
 
 /*
  *  Define patterns for testing
@@ -20,6 +21,8 @@ unsigned char testc_md5[] = {0x77, 0x07, 0xd6, 0xae, 0x4e, 0x02, 0x7c, 0x70, 0xe
 unsigned char testq_md5[] = {0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6};
 unsigned char testl_md5[] = {0x5b, 0x61, 0x37, 0x72, 0xd2, 0xe9, 0x07, 0x7d, 0x2d, 0x40, 0x9b, 0xb6, 0x62, 0x9f, 0xdb, 0x09};
 
+#ifndef SXE_DISABLE_OPENSSL
+
 static void
 is_md5(void * expected, void * got, const char * str)
 {
@@ -35,12 +38,21 @@ is_md5(void * expected, void * got, const char * str)
     fail("%s", str);
 }
 
+#endif
+
 int
 main(void)
 {
+    char  Message_Digest_Hex[MD5_IN_HEX_LENGTH + 1];
+
+#if SXE_DISABLE_OPENSSL
+    plan_tests(1);    // The MD5 interface is a wrapper around OpenSSL, so don't test it if OpenSSL support disabled
+
+    md5_to_hex((SOPHOS_MD5 *)testa_md5, Message_Digest_Hex, sizeof(Message_Digest_Hex));
+    is_eq(Message_Digest_Hex, "900150983cd24fb0d6963f7d28e17f72", "Hex version of digest is correct");
+#else
     MD5_CTX       md5;
     SOPHOS_MD5    Message_Digest;
-    char          Message_Digest_Hex[MD5_IN_HEX_LENGTH + 1];
     int           i;
 
     plan_tests(6);
@@ -52,7 +64,7 @@ main(void)
     MD5_Update(&md5, (const unsigned char *)TESTA, strlen(TESTA));
     MD5_Final(&Message_Digest, &md5);
     is_md5(testa_md5, &Message_Digest, "Test A: MD5 as expected");
-    md5_to_hex(&Message_Digest, Message_Digest_Hex, sizeof Message_Digest_Hex);
+    md5_to_hex(&Message_Digest, Message_Digest_Hex, sizeof(Message_Digest_Hex));
     is_eq(Message_Digest_Hex, "900150983cd24fb0d6963f7d28e17f72", "Hex version of digest is correct");
 
     /*
@@ -90,6 +102,7 @@ main(void)
     MD5_Update(&md5, (const unsigned char *)TESTL, strlen(TESTL));
     MD5_Final(&Message_Digest, &md5);
     is_md5(testl_md5, &Message_Digest,  "Long test: MD5 as expected");
+#endif
 
     return exit_status();
 }

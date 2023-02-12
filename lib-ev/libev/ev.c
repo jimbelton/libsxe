@@ -6,14 +6,14 @@
  *
  * Redistribution and use in source and binary forms, with or without modifica-
  * tion, are permitted provided that the following conditions are met:
- * 
+ *
  *   1.  Redistributions of source code must retain the above copyright notice,
  *       this list of conditions and the following disclaimer.
- * 
+ *
  *   2.  Redistributions in binary form must reproduce the above copyright
  *       notice, this list of conditions and the following disclaimer in the
  *       documentation and/or other materials provided with the distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MER-
  * CHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
@@ -106,7 +106,7 @@ extern "C" {
 #   define EV_USE_POLL 0
 #  endif
 # endif
-   
+
 # ifndef EV_USE_EPOLL
 #  if HAVE_EPOLL_CTL && HAVE_SYS_EPOLL_H
 #   define EV_USE_EPOLL 1
@@ -114,7 +114,7 @@ extern "C" {
 #   define EV_USE_EPOLL 0
 #  endif
 # endif
-   
+
 # ifndef EV_USE_KQUEUE
 #  if HAVE_KQUEUE && HAVE_SYS_EVENT_H && HAVE_SYS_QUEUE_H
 #   define EV_USE_KQUEUE 1
@@ -122,7 +122,7 @@ extern "C" {
 #   define EV_USE_KQUEUE 0
 #  endif
 # endif
-   
+
 # ifndef EV_USE_PORT
 #  if HAVE_PORT_H && HAVE_PORT_CREATE
 #   define EV_USE_PORT 1
@@ -154,7 +154,7 @@ extern "C" {
 #   define EV_USE_EVENTFD 0
 #  endif
 # endif
- 
+
 #endif
 
 #include <math.h>
@@ -1137,7 +1137,7 @@ downheap (ANHE *heap, int N, int k)
 
       heap [k] = heap [c];
       ev_active (ANHE_w (heap [k])) = k;
-      
+
       k = c;
     }
 
@@ -1262,6 +1262,8 @@ evpipe_write (EV_P_ EV_ATOMIC_T *flag)
 
       *flag = 1;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
 #if EV_USE_EVENTFD
       if (evfd >= 0)
         {
@@ -1271,6 +1273,7 @@ evpipe_write (EV_P_ EV_ATOMIC_T *flag)
       else
 #endif
         write (evpipe [1], &old_errno, 1);
+#pragma GCC diagnostic pop
 
       errno = old_errno;
     }
@@ -1283,6 +1286,8 @@ pipecb (EV_P_ ev_io *iow, int revents)
 {
   int i;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
 #if EV_USE_EVENTFD
   if (evfd >= 0)
     {
@@ -1295,9 +1300,10 @@ pipecb (EV_P_ ev_io *iow, int revents)
       char dummy;
       read (evpipe [0], &dummy, 1);
     }
+#pragma GCC diagnostic pop
 
   if (sig_pending)
-    {    
+    {
       sig_pending = 0;
 
       for (i = EV_NSIG - 1; i--; )
@@ -1494,7 +1500,7 @@ ev_supported_backends (void)
   if (EV_USE_EPOLL ) flags |= EVBACKEND_EPOLL;
   if (EV_USE_POLL  ) flags |= EVBACKEND_POLL;
   if (EV_USE_SELECT) flags |= EVBACKEND_SELECT;
-  
+
   return flags;
 }
 
@@ -3001,7 +3007,7 @@ infy_add (EV_P_ ev_stat *w)
 
               *pend = 0;
               w->wd = inotify_add_watch (fs_fd, path, mask);
-            } 
+            }
           while (w->wd < 0 && (errno == ENOENT || errno == EACCES));
         }
     }

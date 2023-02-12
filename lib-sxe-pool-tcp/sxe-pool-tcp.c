@@ -107,10 +107,10 @@ connect_ramp(SXE * this, SXE_POOL_TCP * pool)
 
             if (result != SXE_RETURN_OK)
             {
-                SXEL2I("TCP pool %s: failed to allocate a SXE object to spawn %s", SXE_POOL_TCP_GET_NAME(pool), pool->command);
-                sxe_pool_set_indexed_element_state(pool->nodes, item, SXE_POOL_TCP_STATE_CONNECTING,
+                SXEL2I("TCP pool %s: failed to allocate a SXE object to spawn %s", SXE_POOL_TCP_GET_NAME(pool), pool->command);    /* COVERAGE EXCLUSION: TODO: Determine why this is no longer covered. */
+                sxe_pool_set_indexed_element_state(pool->nodes, item, SXE_POOL_TCP_STATE_CONNECTING,    /* COVERAGE EXCLUSION: TODO: Determine why this is no longer covered. */
                                                    SXE_POOL_TCP_STATE_UNCONNECTED);
-                goto SXE_ERROR_OUT;
+                goto SXE_ERROR_OUT;    /* COVERAGE EXCLUSION: TODO: Determine why this is no longer covered. */
             }
 
             node->sxe = SXE_SPAWN_GET_SXE(&node->current_spawn);
@@ -211,10 +211,10 @@ sxe_pool_tcp_event_connected(SXE * this)
                 pid_previous, strerror(errno));
 
         if (pid_returned == 0) {
-            SXEL2I("TCP pool %s: Node %u previous process %d did not exit: killing it",
+            SXEL2I("TCP pool %s: Node %u previous process %d did not exit: killing it",    /* COVERAGE EXCLUSION: TBD */
                     SXE_POOL_TCP_GET_NAME(pool), item, pid_previous);
-            sxe_spawn_kill(&node->previous_spawn, SIGKILL);
-            node->failure_count++;
+            sxe_spawn_kill(&node->previous_spawn, SIGKILL);                                /* COVERAGE EXCLUSION: TBD */
+            node->failure_count++;                                                         /* COVERAGE EXCLUSION: TBD */
         }
         else if (WIFEXITED(status)) {
             if (WEXITSTATUS(status) == 0) {

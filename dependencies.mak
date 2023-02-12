@@ -24,17 +24,24 @@
 COM.dir := $(patsubst %/,%,$(dir $(word $(words $(MAKEFILE_LIST)), $(MAKEFILE_LIST))))
 TOP.dir = $(COM.dir)/..
 
-# Defined if internal tap if to be used. Use lazy binding to allow SXE_EXTERNAL_TAP to be defined later
-TAP     = $(if $(SXE_EXTERNAL_TAP),,tap)
-LIB_TAP = $(if $(SXE_EXTERNAL_TAP),,lib-tap)
+MAK_VERSION ?= 2
+
+ifeq ($(MAK_VERSION),1)
+SXE_EMBEDDED_TAP = 1
+endif
+
+ifdef SXE_EMBEDDED_TAP
+TAP     = tap
+LIB_TAP = lib-tap
+endif
 
 # List of the libraries in linker order.
 # This is used by both the package GNUmakefiles and the top level GNUmakefile
 # This can be overridden by parent GNUmakefiles if desired
 #
 remove_to = $(if $(filter $(1),$(2)),$(call remove_to,$(1),$(wordlist 2,$(words $(2)),$(2))),$(2))
-ALL_LIBRARIES ?= sxe-dirwatch sxe-ring-buffer sxe-httpd sxe-http sxe-sync-ev sxe-pool-tcp sxe-jitson sxe-cdb sxe-hash lookup3 \
-                 murmurhash3 sha1 sxe-spawn sxe sxe-pool sxe-thread sxe-mmap sxe-buffer sxe-list sxe-socket \
+ALL_LIBRARIES ?= sxe-dirwatch sxe-ring-buffer sxe-httpd sxe-http sxe-sync-ev sxe-pool-tcp sxe-jitson sxe-dict sxe-cdb sxe-hash \
+                 lookup3 md5 murmurhash3 sha1 sxe-spawn sxe sxe-pool sxe-thread sxe-mmap sxe-buffer sxe-list sxe-socket \
                  ev sxe-cstr sxe-util sxe-log sxe-test mock port $(TAP)
 LIB_DEPENDENCIES = $(call remove_to,$(LIBRARIES),$(ALL_LIBRARIES))
 
@@ -44,13 +51,9 @@ MAKE_ALLOW_SPACE_AFTER_ASTERISK  = 1    # Much of lib-sxe puts all declarations 
 MAKE_ALLOW_LOWERCASE_HASH_DEFINE = 1    # Allow lower case defines for sxe-alloc.h wrappers
 
 # Coverage opt-out list
-COVERAGE_OPTOUT_LIST   = lib-lookup3 lib-murmurhash3 lib-mock lib-port lib-sha1 $(LIB_TAP)
+COVERAGE_OPTOUT_LIST = lib-sxe-dict lib-lookup3 lib-murmurhash3 lib-mock lib-port lib-sha1 $(LIB_TAP)
 
 include $(TOP.dir)/mak/mak-common.mak
-
-ifneq ($(MAK_VERSION),1)    # Versions of mak > 1 use an external tap libary
-    SXE_EXTERNAL_TAP = 1
-endif
 
 IFLAGS += $(if $(findstring port,$(LIB_DEPENDENCIES)),$(CC_INC)$(COM.dir)/lib-port/$(OS_class),)
 
@@ -61,8 +64,18 @@ else
     LINK_FLAGS += /DEFAULTLIB:Winmm.lib
 endif
 else
-    LINK_FLAGS += -lrt    # Add -lcrypto if SXE_DISABLE_OPENSSL is not set
+ifdef SXE_DISABLE_OPENSSL
+    LINK_FLAGS                += -lrt
+    CFLAGS                    += -DSXE_DISABLE_OPENSSL=1
+    MAK_RECURSIVE_DEFINITIONS += SXE_DISABLE_OPENSSL=1
+else
+    LINK_FLAGS += -lrt -lcrypto
+endif
 endif
 
-# Add -DSXE_DISABLE_XXHASH=1 to remove dependency on xxhash
-CFLAGS += -DSXE_DISABLE_OPENSSL=1
+# Uncomment the following line to remove all dependencies on the xxhash package
+# SXE_DISABLE_XXHASH := 1
+
+ifdef SXE_DISABLE_XXHASH
+    CFLAGS += -DSXE_DISABLE_XXHASH=1
+endif

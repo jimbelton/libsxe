@@ -19,7 +19,9 @@
  * THE SOFTWARE.
  */
 
-#ifndef __SXE_THREAD__
+#ifndef __SXE_THREAD_H__
+#define __SXE_THREAD_H__
+
 #include "sxe-log.h"
 #include "sxe-socket.h"
 
@@ -27,6 +29,7 @@
 
 #ifdef _WIN32
 #   include <windows.h>
+#   define __thread   __declspec( thread )
     typedef HANDLE    SXE_THREAD;
     typedef DWORD     SXE_THREAD_RETURN;
 
@@ -36,5 +39,16 @@
     typedef void *    SXE_THREAD_RETURN;
 #endif
 
+#define SXE_THREAD_MEMORY_UNUSED 1                           // Free thread memory of dead threads
+#define SXE_THREAD_MEMORY_ALL    2                           // Free thread memory of dead threads and the current thread
+
+struct sxe_thread_memory {
+    void                     *memory;                        // Allocated memory
+    void                    (*free)(void *);                 // Function to call to free memory or NULL to call sxe_free
+    struct sxe_thread_memory *next;                          // Pointer to next tracker or NULL
+    pid_t                     tid;                           // The tid of the thread that allocated the memory
+};
+
 #include "lib-sxe-thread-proto.h"
+
 #endif

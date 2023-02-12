@@ -196,14 +196,17 @@ main(void) {
     struct object   self;
     struct object * this = &self;
 
-    plan_tests(50);
+    plan_tests(53);
 
     /* Test sxe_return_to_string()
      */
     is_eq(sxe_return_to_string(SXE_RETURN_OK),             "OK"            , "sxe_return_to_string(SXE_RETURN_OK) eq \"OK\"");
     is_eq(sxe_return_to_string(SXE_RETURN_ERROR_INTERNAL), "ERROR_INTERNAL", "sxe_return_to_string(SXE_RETURN_ERROR_INTERNAL) eq \"ERROR_INTERNAL\"");
     is(   sxe_return_to_string(~0U),                        NULL,            "sxe_return_to_string(~0U) == NULL");
+    TEST_CASE_RETURN_TO_STRING(DEADLOCK_WOULD_OCCUR);
     TEST_CASE_RETURN_TO_STRING(EXPIRED_VALUE);
+    TEST_CASE_RETURN_TO_STRING(OUT_OF_RANGE);
+    TEST_CASE_RETURN_TO_STRING(NO_SUCH_PROCESS);
     TEST_CASE_RETURN_TO_STRING(NO_UNUSED_ELEMENTS);
     TEST_CASE_RETURN_TO_STRING(IN_PROGRESS);
     TEST_CASE_RETURN_TO_STRING(UNCATEGORIZED);
@@ -215,7 +218,7 @@ main(void) {
     TEST_CASE_RETURN_TO_STRING(ERROR_ALLOC);
     TEST_CASE_RETURN_TO_STRING(ERROR_NO_CONNECTION);
     TEST_CASE_RETURN_TO_STRING(ERROR_ALREADY_CONNECTED);
-    TEST_CASE_RETURN_TO_STRING(ERROR_INVALID_URI);
+    TEST_CASE_RETURN_TO_STRING(ERROR_INVALID);
     TEST_CASE_RETURN_TO_STRING(ERROR_BAD_MESSAGE);
     TEST_CASE_RETURN_TO_STRING(ERROR_ADDRESS_IN_USE);
     TEST_CASE_RETURN_TO_STRING(ERROR_INTERRUPTED);

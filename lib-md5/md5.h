@@ -14,11 +14,16 @@ typedef struct SOPHOS_MD5_STRUCT {
 } SOPHOS_MD5;
 
 #ifndef SXE_DISABLE_OPENSSL
-#   include <openssl/md5.h>
+/* This code will throw a warning and likely not work with libssl3
+ * if SXE_DISABLE_OPENSSL flag is removed from compilation options in
+ * dependencies.mak
+ */
 
-#   if MD5_DIGEST_LENGTH != MD5_SIZE
-#       error "MD5_DIGEST_LENGTH in <openssl/md5.h> is not 16"
-#   endif
+#include <openssl/md5.h>
+
+#if MD5_DIGEST_LENGTH != MD5_SIZE
+#   error "MD5_DIGEST_LENGTH in <openssl/md5.h> is not 16"
+#endif
 
 typedef union MD5_CTX_UNION {
     MD5_CTX          md5_openssl;
@@ -42,10 +47,11 @@ md5_ctx_get_sum( MD5_CTX_UNION * ctx, SOPHOS_MD5 * result)
     MD5_Final((unsigned char *)result, (MD5_CTX *)ctx);
 }
 
-#   define MD5_CTX                     MD5_CTX_UNION
-#   define MD5_Init(ctx)               md5_ctx_construct(ctx)
-#   define MD5_Update(ctx, data, size) md5_ctx_update((ctx), (data), (size))
-#   define MD5_Final(result, ctx)      md5_ctx_get_sum((ctx), (SOPHOS_MD5 *)(result))
+#define MD5_CTX                     MD5_CTX_UNION
+#define MD5_Init(ctx)               md5_ctx_construct(ctx)
+#define MD5_Update(ctx, data, size) md5_ctx_update((ctx), (data), (size))
+#define MD5_Final(result, ctx)      md5_ctx_get_sum((ctx), (SOPHOS_MD5 *)(result))
+
 #endif
 
 SXE_RETURN md5_from_hex(SOPHOS_MD5 * md5, const char * md5_in_hex);

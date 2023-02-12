@@ -35,31 +35,12 @@
 #include "sxe-spinlock.h"
 #include "sxe-unicode.h"
 
-static uint64_t        identifier_chars[4] = {0x03FF400000000000, 0x07FFFFFE87FFFFFE, 0x0000000000000000, 0x00000000000000};
 static pthread_mutex_t type_indexing       = PTHREAD_MUTEX_INITIALIZER;     // Lock around (slow) just in time indexing
 
 bool
 sxe_jitson_is_reference(const struct sxe_jitson * jitson)
 {
     return (jitson->type & SXE_JITSON_TYPE_MASK) == SXE_JITSON_TYPE_REFERENCE;
-}
-
-/**
- * Parse identifier characters until a non-identifier character is reached. Can be called after parsing the first character.
- *
- * @param json String to parse
- *
- * @return Pointer to first non-identifier character in json
- */
-const char *
-sxe_jitson_parse_identifier(const char *json)
-{
-    unsigned c;
-
-    for (c = (unsigned char)*json; identifier_chars[c >> 6] & (1UL << (c & 0x3f)); c = (unsigned char)*json)
-        json++;
-
-    return json;
 }
 
 /**
@@ -279,7 +260,7 @@ sxe_jitson_array_get_element(const struct sxe_jitson *jitson, unsigned idx)
 
         if (!(jitson->type & SXE_JITSON_TYPE_INDEXED)) {    // Recheck under the lock in case of a race
             /* Allocate an array of len offsets + 1 to store the size in jitsons
-            */
+             */
             if (!(index = MOCKFAIL(MOCK_FAIL_ARRAY_GET_ELEMENT, NULL, sxe_malloc((jitson->len + 1) * sizeof(uint32_t))))) {
                 pthread_mutex_unlock(&type_indexing);
                 return NULL;
@@ -322,6 +303,14 @@ sxe_jitson_make_number(struct sxe_jitson *jitson, double number)
     return jitson;
 }
 
+struct sxe_jitson *
+sxe_jitson_make_uint(struct sxe_jitson *jitson, uint64_t uint)
+{
+    jitson->type    = SXE_JITSON_TYPE_NUMBER | SXE_JITSON_TYPE_IS_UINT;
+    jitson->integer = uint;
+    return jitson;
+}
+
 /**
  * Create a jitson string value that references an immutable C string
  */
@@ -346,7 +335,8 @@ struct sxe_jitson *
 sxe_jitson_make_reference(struct sxe_jitson *jitson, const struct sxe_jitson *to)
 {
     jitson->type   = SXE_JITSON_TYPE_REFERENCE;
-    jitson->jitref = to->type == SXE_JITSON_TYPE_REFERENCE ? to->jitref : to;    // Don't create references to references
+    // Don't create references to references
+    jitson->jitref = (to->type & SXE_JITSON_TYPE_MASK) == SXE_JITSON_TYPE_REFERENCE ? to->jitref : to;
     return jitson;
 }
 

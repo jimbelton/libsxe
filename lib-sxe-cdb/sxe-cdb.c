@@ -42,22 +42,33 @@ static                SXE_SPINLOCK       sxe_cdb_ensemble_lock = { 0 }; /* usid 
 static __thread const uint8_t          * sxe_cdb_key                  ; /* used by sxe_cdb_prepare() */
 static __thread       uint32_t           sxe_cdb_key_len              ; /* used by sxe_cdb_prepare() */
 
+/*-
+ * Finalize the sxe-cdb package per thread
+ */
+void
+sxe_cdb_finalize_thread(void)
+{
+    if (sxe_cdb_tls_hkv) {
+        sxe_free(sxe_cdb_tls_hkv);
+        sxe_cdb_tls_hkv = NULL;
+    }
+}
+
 SXE_CDB_HKV *
 sxe_cdb_copy_hkv_to_tls(SXE_CDB_INSTANCE * cdb_instance, uint32_t hkv_pos)
 {
     SXE_CDB_HKV * hkv = (SXE_CDB_HKV *) &cdb_instance->kvdata[hkv_pos];
     sxe_cdb_hkv_unpack(hkv, &sxe_cdb_tls_hkv_part);
     if (sxe_cdb_tls_hkv_part.hkv_len > sxe_cdb_tls_hkv_len_max) {
-        SXEL7("(){} // realloc() from %u bytes to %u bytes", sxe_cdb_tls_hkv_len_max, sxe_cdb_tls_hkv_part.hkv_len);
+        SXEL7("%s(){} // realloc() from %u bytes to %u bytes", __FUNCTION__, sxe_cdb_tls_hkv_len_max, sxe_cdb_tls_hkv_part.hkv_len);
         sxe_cdb_tls_hkv         = sxe_realloc(sxe_cdb_tls_hkv , sxe_cdb_tls_hkv_part.hkv_len);
-        sxe_cdb_tls_hkv_len_max = sxe_cdb_tls_hkv ? sxe_cdb_tls_hkv_part.hkv_len : 0 /* realloc() failed :-( */;
-        SXEA1(sxe_cdb_tls_hkv, ": realloc() failed for %zu bytes", sizeof(sxe_cdb_tls_hkv_part.hkv_len));
+        sxe_cdb_tls_hkv_len_max = sxe_cdb_tls_hkv ? sxe_cdb_tls_hkv_part.hkv_len : 0;    // sxe_realloc() failed :-(
+        SXEA1(sxe_cdb_tls_hkv, "ERROR: INTERNAL: realloc() failed for %zu bytes // %s(){}", sizeof(sxe_cdb_tls_hkv_part.hkv_len), __FUNCTION__);
     }
-    if (sxe_cdb_tls_hkv_len_max >= sxe_cdb_tls_hkv_part.hkv_len) {
-        memcpy(sxe_cdb_tls_hkv,  hkv, sxe_cdb_tls_hkv_part.hkv_len); /* copy hkv into a tls buffer (for caller) */
-        sxe_cdb_tls_hkv_part.key = &((uint8_t *)sxe_cdb_tls_hkv)[sxe_cdb_tls_hkv_part.hkv_len - sxe_cdb_tls_hkv_part.key_len
-                                 - sxe_cdb_tls_hkv_part.val_len]; /* as a courtesy to the caller, */
-        sxe_cdb_tls_hkv_part.val = &((uint8_t *)sxe_cdb_tls_hkv)[sxe_cdb_tls_hkv_part.hkv_len - sxe_cdb_tls_hkv_part.val_len]; /* pretend we've just unpacked the tls */
+    if (       sxe_cdb_tls_hkv_len_max >=      sxe_cdb_tls_hkv_part.hkv_len) {
+        memcpy(sxe_cdb_tls_hkv         ,  hkv, sxe_cdb_tls_hkv_part.hkv_len); /* copy hkv into a tls buffer (for caller) */
+        sxe_cdb_tls_hkv_part.key = &((uint8_t  *) sxe_cdb_tls_hkv)[sxe_cdb_tls_hkv_part.hkv_len - sxe_cdb_tls_hkv_part.key_len - sxe_cdb_tls_hkv_part.val_len]; /* as a courtesy to the caller, */
+        sxe_cdb_tls_hkv_part.val = &((uint8_t  *) sxe_cdb_tls_hkv)[sxe_cdb_tls_hkv_part.hkv_len -                                sxe_cdb_tls_hkv_part.val_len]; /* pretend we've just unpacked the tls */
     }
     return sxe_cdb_tls_hkv;
 } /* sxe_cdb_copy_hkv_to_tls() */
@@ -144,7 +155,7 @@ sxe_cdb_instance_new(
     uint32_t kvdata_maximum) /* maximum bytes for kvdata memory or zero means no limit (i.e. up to 4GB) */
 {
     SXE_CDB_INSTANCE * cdb_instance = sxe_malloc(sizeof(*cdb_instance));
-    SXEA1(cdb_instance, "ERROR: INTERNAL: malloc() failed for %zu bytes // %s(){}", sizeof(*cdb_instance), __FUNCTION__);
+    SXEA1(cdb_instance, "ERROR: INTERNAL: sxe_malloc() failed for %zu bytes // %s(){}", sizeof(*cdb_instance), __FUNCTION__);
 
     SXEE6("(keys_at_start=%u, kvdata_maximum=%u)", keys_at_start, kvdata_maximum);
 
@@ -949,25 +960,24 @@ sxe_cdb_ensemble_new(
 {
     SXE_CDB_ENSEMBLE * cdb_ensemble = NULL;
 
-    SXEE6("(keys_at_start=%u, kvdata_maximum=%lu, cdb_count=%u, cdb_is_locked=%u)", keys_at_start, kvdata_maximum, cdb_count,
-          cdb_is_locked);
+    SXEE6("(keys_at_start=%u, kvdata_maximum=%lu, cdb_count=%u, cdb_is_locked=%u)", keys_at_start, kvdata_maximum, cdb_count, cdb_is_locked);
 
     while (SXE_SPINLOCK_STATUS_TAKEN != sxe_spinlock_take(&sxe_cdb_ensemble_lock)) {
         SXEL5("%s() failed to acquire sxe_cdb_ensemble_lock; trying again", __FUNCTION__); /* COVERAGE EXCLUSION: todo: create multi-threaded test to show this informational lock message */
     }
 
     if (cdb_count <= 256) { /* limit uid size to 5 bytes; max. kvdata space is 256 * 4GB or 1,024GB */
-        cdb_ensemble = sxe_malloc(sizeof(*cdb_ensemble));
-        SXEA1(cdb_ensemble, ": sxe_malloc() failed for %zu bytes", sizeof(*cdb_ensemble));
+        cdb_ensemble = sxe_malloc(sizeof(* cdb_ensemble));
+        SXEA1(cdb_ensemble, "ERROR: INTERNAL: sxe_malloc() failed for %zu bytes // %s(){}", sizeof(* cdb_ensemble), __FUNCTION__);
         cdb_ensemble->cdb_instances      = sxe_malloc(cdb_count * sizeof(cdb_ensemble->cdb_instances));
         cdb_ensemble->cdb_instance_locks = sxe_malloc(cdb_count * sizeof(cdb_ensemble->cdb_instance_locks));
-        SXEA1(cdb_ensemble->cdb_instances, ": sxe_malloc() failed for %zu bytes",
-              cdb_count * sizeof(cdb_ensemble->cdb_instances));
-        SXEA1(cdb_ensemble->cdb_instance_locks, ": sxe_malloc() failed for %zu bytes",
-              cdb_count * sizeof(cdb_ensemble->cdb_instance_locks));
-        SXEL6("cdb_ensemble                     = sxe_malloc(%zu)",                  sizeof(*cdb_ensemble));
-        SXEL6("cdb_ensemble->cdb_instances      = sxe_malloc(%u * %zu)", cdb_count , sizeof(cdb_ensemble->cdb_instances));
-        SXEL6("cdb_ensemble->cdb_instance_locks = sxe_malloc(%u * %zu)", cdb_count , sizeof(cdb_ensemble->cdb_instance_locks));
+        SXEA1(cdb_ensemble->cdb_instances,       "ERROR: INTERNAL: sxe_malloc() failed for %zu bytes // %s(){}",
+              cdb_count * sizeof(cdb_ensemble->cdb_instances), __FUNCTION__);
+        SXEA1(cdb_ensemble->cdb_instance_locks , "ERROR: INTERNAL: sxe_malloc() failed for %zu bytes // %s(){}",
+              cdb_count * sizeof(cdb_ensemble->cdb_instance_locks), __FUNCTION__);
+        SXEL6("cdb_ensemble                     = sxe_malloc(%zu)", sizeof(* cdb_ensemble));
+        SXEL6("cdb_ensemble->cdb_instances      = sxe_malloc(%u * %zu)", cdb_count, sizeof(cdb_ensemble->cdb_instances));
+        SXEL6("cdb_ensemble->cdb_instance_locks = sxe_malloc(%u * %zu)", cdb_count, sizeof(cdb_ensemble->cdb_instance_locks));
 
         SXEL6("creating array of cdb pointers, each with its own lock:");
         uint32_t i;

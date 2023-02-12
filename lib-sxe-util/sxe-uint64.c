@@ -24,7 +24,7 @@
 #include "sxe-util.h"
 
 /**
- * Base 2 logarithm of a uint64_t as an unsinged int
+ * Base 2 logarithm of a uint64_t as an unsigned int
  *
  * @note This implementation is non-portable. See sxe-unsigned for a portable version for unsigned ints
  */
@@ -38,7 +38,7 @@ uint64_t
 sxe_uint64_align(uint64_t value, uint64_t multiple)
 {
     uint64_t mod;
-     
+
     if (multiple & (multiple - 1))
         return (mod = value % multiple) ? value - mod + multiple : value;
 

@@ -26,9 +26,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sxe-alloc.h"
 #include "sxe-factory.h"
 
-#define SXE_JITSON_FLAG_ALLOW_HEX 0x00000001    // Allow hexadecimal when parsing numbers, which isn't strictly valid JSON
+#define SXE_JITSON_FLAG_STRICT       0             // Disable all extensions. This is only valid for a sxe_jitson_source.
+#define SXE_JITSON_FLAG_ALLOW_HEX    0x00000001    // Allow hexadecimal when parsing numbers, which isn't strictly valid JSON
+#define SXE_JITSON_FLAG_ALLOW_CONSTS 0x00000002    // Replace parsed constants (default if sxe_jitson_type_init called)
+#define SXE_JITSON_FLAG_ALLOW_IDENTS 0x00000004    // Return parsed identifiers (default if sxe_jitson_ident_register called)
 
 #define SXE_JITSON_MIN_TYPES 8    // The minimum number of types for JSON
 
@@ -83,6 +87,13 @@ struct sxe_jitson {
     };
 };
 
+struct sxe_jitson_source {
+    const char *json;     // Pointer into a buffer containing JSON to be parsed
+    const char *next;     // Pointer to the next character to be parsed
+    const char *end;      // Pointer after the last character to be parsed (max pointer value if the buffer is NUL terminated).
+    uint32_t    flags;    // Specific JSON extensions allowed while parsing this source
+};
+
 struct sxe_jitson_stack {
     unsigned           maximum;
     unsigned           count;
@@ -90,9 +101,10 @@ struct sxe_jitson_stack {
     unsigned           open;       // Index + 1 of the deepest open collection that's under construction or 0 if none
 };
 
-extern uint32_t sxe_jitson_flags;
+extern uint32_t sxe_jitson_flags;    // Default JSON extensions allowed
 
 #include "sxe-jitson-proto.h"
+#include "sxe-jitson-source-proto.h"
 #include "sxe-jitson-stack-proto.h"
 #include "sxe-jitson-type-proto.h"
 
@@ -131,6 +143,12 @@ sxe_jitson_stack_add_member_number(struct sxe_jitson_stack *stack, const char *n
 }
 
 static inline bool
+sxe_jitson_stack_add_member_uint(struct sxe_jitson_stack *stack, const char *name, uint64_t uint)
+{
+    return sxe_jitson_stack_add_member_name(stack, name, SXE_JITSON_TYPE_IS_COPY) && sxe_jitson_stack_add_uint(stack, uint);
+}
+
+static inline bool
 sxe_jitson_stack_add_member_reference(struct sxe_jitson_stack *stack, const char *name, const struct sxe_jitson *to)
 {
     return sxe_jitson_stack_add_member_name(stack, name, SXE_JITSON_TYPE_IS_COPY) && sxe_jitson_stack_add_reference(stack, to);
@@ -140,6 +158,128 @@ static inline bool
 sxe_jitson_stack_add_member_dup(struct sxe_jitson_stack *stack, const char *name, const struct sxe_jitson *value)
 {
      return sxe_jitson_stack_add_member_name(stack, name, SXE_JITSON_TYPE_IS_COPY) && sxe_jitson_stack_add_dup(stack, value);
+}
+
+static inline struct sxe_jitson *
+sxe_jitson_create_null(void)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_null(jitson);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+static inline struct sxe_jitson *
+sxe_jitson_create_bool(bool boolean)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_bool(jitson, boolean);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+static inline struct sxe_jitson *
+sxe_jitson_create_number(double number)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_number(jitson, number);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+static inline struct sxe_jitson *
+sxe_jitson_create_uint(uint64_t integer)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_uint(jitson, integer);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+/**
+ * Create a jitson string value that references an immutable C string
+ */
+static inline struct sxe_jitson *
+sxe_jitson_create_string_ref(const char *string)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_string_ref(jitson, string);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+/**
+ * Create a jitson string value with an owned reference to a duplication of a C string
+ */
+static inline struct sxe_jitson *
+sxe_jitson_create_string_dup(const char *string)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    if (!(string = sxe_strdup(string))) {
+        sxe_free(jitson);
+        return NULL;
+    }
+
+    sxe_jitson_make_string_ref(jitson, string);
+    jitson->type |= SXE_JITSON_TYPE_IS_OWN | SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+/**
+ * Create a reference to another jitson that will behave exactly like the original jitson
+ *
+ * @param jitson Pointer to jitson to create
+ * @param to     jitson to refer to
+ *
+ * @note References are only valid during the lifetime of the jitson they refer to
+ */
+static inline struct sxe_jitson *
+sxe_jitson_create_reference(const struct sxe_jitson *to)
+{
+    struct sxe_jitson *jitson;
+
+    if (!(jitson = sxe_malloc(sizeof(struct sxe_jitson))))
+        return NULL;
+
+    sxe_jitson_make_reference(jitson, to);
+    jitson->type |= SXE_JITSON_TYPE_ALLOCED;
+    return jitson;
+}
+
+static inline uint32_t
+sxe_jitson_source_get_flags(struct sxe_jitson_source *source)
+{
+    return source->flags;
+}
+
+static inline size_t
+sxe_jitson_source_get_consumed(struct sxe_jitson_source *source)
+{
+    return source->next - source->json;
 }
 
 #define MOCK_FAIL_STACK_NEW_OBJECT       ((char *)sxe_jitson_new + 0)

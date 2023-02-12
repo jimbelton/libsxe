@@ -20,6 +20,7 @@
  */
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -29,14 +30,6 @@
 #include "sxe-log.h"
 #include "sxe-util.h"
 
-struct sxe_jitson_op {
-    bool is_binary;
-    union {
-        struct sxe_jitson *(*unary)( const struct sxe_jitson *);
-        struct sxe_jitson *(*binary)(const struct sxe_jitson *, const struct sxe_jitson *);
-    } def;
-};
-
 struct sxe_jitson_type {
     const char *name;
     void      (*free)(            struct sxe_jitson *);    // Free any memory allocated to the value (e.g. indices)
@@ -45,14 +38,9 @@ struct sxe_jitson_type {
     size_t    (*len)(       const struct sxe_jitson *);    // The logical length (strlen, number of elements, number of members)
     bool      (*clone)(     const struct sxe_jitson *, struct sxe_jitson *);     // Clone (deep copy) a value's data
     char *    (*build_json)(const struct sxe_jitson *, struct sxe_factory *);    // Format a value
-    unsigned    num_ops;    // Number of additonal operations supported by this type
-    union {
-        struct sxe_jitson *(*unary)( const struct sxe_jitson *);
-        struct sxe_jitson *(*binary)(const struct sxe_jitson *, struct sxe_jitson *);
-    } *ops;
 };
 
-uint32_t sxe_jitson_flags = 0;     // Flags past at initialization
+uint32_t sxe_jitson_flags = 0;    // Flags passed at initialization
 
 static uint32_t                type_count = 0;
 static struct sxe_jitson_type *types      = NULL;
@@ -113,11 +101,7 @@ sxe_jitson_free_base(struct sxe_jitson *jitson)
         sxe_free(reference);
     }
 
-    if (!(jitson->type & SXE_JITSON_TYPE_ALLOCED))
-        return;
-
     jitson->type = SXE_JITSON_TYPE_INVALID;
-    sxe_free((struct sxe_jitson *)(uintptr_t)jitson);
 }
 
 uint32_t
@@ -179,7 +163,7 @@ sxe_jitson_number_test(const struct sxe_jitson *jitson)
     return jitson->number != 0.0;
 }
 
-#define DOUBLE_MAX_LEN 24
+#define NUMBER_MAX_LEN 24    // Enough space for the largest double and the largest uint64_t
 
 static char *
 sxe_jitson_number_build_json(const struct sxe_jitson *jitson, struct sxe_factory *factory)
@@ -187,12 +171,28 @@ sxe_jitson_number_build_json(const struct sxe_jitson *jitson, struct sxe_factory
     char    *ret;
     unsigned len;
 
-    if ((ret = sxe_factory_reserve(factory, DOUBLE_MAX_LEN)) == NULL)
+    if ((ret = sxe_factory_reserve(factory, NUMBER_MAX_LEN)) == NULL)
         return NULL;
 
-    len = snprintf(ret, DOUBLE_MAX_LEN + 1, "%G", sxe_jitson_get_number(jitson));
-    SXEA6(len <= DOUBLE_MAX_LEN, "As a string, numeric value %G is more than %u characters long",
-          sxe_jitson_get_number(jitson), DOUBLE_MAX_LEN);
+    if (jitson->type & SXE_JITSON_TYPE_IS_UINT) {
+        len = snprintf(ret, NUMBER_MAX_LEN + 1, "%"PRIu64, sxe_jitson_get_uint(jitson));
+        SXEA6(len <= NUMBER_MAX_LEN, "As a string, numeric value %"PRIu64" is more than %u characters long",
+              sxe_jitson_get_uint(jitson), NUMBER_MAX_LEN);
+    } else {
+        /* The format %.17G comes from:
+        *    https://stackoverflow.com/questions/16839658/printf-width-specifier-to-maintain-precision-of-floating-point-value
+        *
+        * Using .17G reveals rounding errors in the encoding of fractions. For example:
+        *    got:      "pi":3.1415899999999999,"number":1.1415900000000001
+        *    expected: "pi":3.14159,           "number":1.14159
+        *
+        * Reducing the format to .16G rounds the numbers back to what was orinally parsed.
+        */
+        len = snprintf(ret, NUMBER_MAX_LEN + 1, "%.16G", sxe_jitson_get_number(jitson));
+        SXEA6(len <= NUMBER_MAX_LEN, "As a string, numeric value %.16G is more than %u characters long",
+              sxe_jitson_get_number(jitson), NUMBER_MAX_LEN);
+    }
+
     sxe_factory_commit(factory, len);
     return sxe_factory_look(factory, NULL);
 }
@@ -247,7 +247,7 @@ sxe_jitson_string_clone(const struct sxe_jitson *jitson, struct sxe_jitson *clon
     /* If the jitson owns the string it's refering to, it must be duplicated
      */
     if ((jitson->type & SXE_JITSON_TYPE_IS_OWN)
-     && (clone->reference = MOCKFAIL(MOCK_FAIL_STRING_CLONE, NULL, sxe_strdup(jitson->string))) == NULL) {
+     && (clone->reference = MOCKFAIL(MOCK_FAIL_STRING_CLONE, NULL, sxe_strdup(jitson->reference))) == NULL) {
         SXEL2("Failed to duplicate a %zu byte string", strlen(jitson->string));
         return false;
     }
@@ -325,12 +325,13 @@ sxe_jitson_type_len(const struct sxe_jitson *jitson)
 static void
 sxe_jitson_free_array(struct sxe_jitson *jitson)
 {
-    unsigned i;
-    uint32_t offset, size;
+    struct sxe_jitson *element;
+    unsigned           i;
+    uint32_t           offset, size;
 
     for (i = 0, offset = 1; i < jitson->len; i++, offset += size) {
-        size = sxe_jitson_size(jitson + offset);
-        sxe_jitson_free(jitson + offset);
+        size = sxe_jitson_size(element = jitson + offset);
+        types[element->type & SXE_JITSON_TYPE_MASK].free(element);
     }
 
     sxe_jitson_free_base(jitson);
@@ -402,68 +403,90 @@ sxe_jitson_type_register_array(void)
 static void
 sxe_jitson_free_object(struct sxe_jitson *jitson)
 {
-    unsigned i, len;
-    uint32_t offset, size;
+    struct sxe_jitson *element;
+    unsigned           i, len;
+    uint32_t           offset, size;
 
     len = jitson->len * 2;    // Objects are pairs of member name/value
 
     for (i = 0, offset = 1; i < len; i++, offset += size) {
-        size = sxe_jitson_size(jitson + offset);
-        sxe_jitson_free(jitson + offset);
+        size = sxe_jitson_size(element = jitson + offset);
+        types[element->type & SXE_JITSON_TYPE_MASK].free(element);
     }
 
     sxe_jitson_free_base(jitson);
 }
 
-static bool
-sxe_jitson_object_clone(const struct sxe_jitson *jitson, struct sxe_jitson *clone)
+/* Helper for cloning the members of one object into another
+ */
+bool
+sxe_jitson_object_clone_members(const struct sxe_jitson *jitson, struct sxe_jitson *clone, unsigned len)
 {
     const struct sxe_jitson *content;
     size_t                   size;
-    unsigned                 i, len;
+    unsigned                 i;
     uint32_t                 index, stop;
     bool                     key;
+
+    for (i = 0, index = 1; i < len; i++, index += size + sxe_jitson_size(&clone[index + size])) {    // For each member
+        content = &jitson[index];
+        size    = sxe_jitson_size(content);
+
+        /* Clone the key and the value
+         */
+        if (!(key = sxe_jitson_clone(content, &clone[index])) || !sxe_jitson_clone(content + size, &clone[index + size])) {
+            stop = index;
+
+            /* For each member already processed
+             */
+            for (i = 0, index = 1; index < stop; i++, index += size + sxe_jitson_size(&clone[index + size])) {
+                SXEA6(i < len, "We missed our stop!");
+                size = sxe_jitson_size(&clone[index]);
+                sxe_jitson_free(&clone[index]);
+                sxe_jitson_free(&clone[index + size]);
+            }
+
+            SXEA6(index == stop, "We skipped our stop!");
+
+            if (key)    // If the last key was cloned, free it
+                sxe_jitson_free(&clone[index]);
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool
+sxe_jitson_object_clone(const struct sxe_jitson *jitson, struct sxe_jitson *clone)
+{
+    size_t   size;
+    unsigned len;
 
     if ((len = jitson->len) == 0)
         return true;
 
-    if (!(jitson->type & SXE_JITSON_TYPE_INDEXED))    // Force indexing. Would it be better to walk the unindexed object?
-        sxe_jitson_object_get_member(jitson, "", 0);
+    if ((jitson->type & SXE_JITSON_TYPE_INDEXED)) {    // If the object is already indexed, must clone it's index
+        size = (len + 1) * sizeof(jitson->index[0]);
 
-    if (!(clone->index = MOCKFAIL(MOCK_FAIL_OBJECT_CLONE, NULL, sxe_malloc((size = (len + 1) * sizeof(jitson->index[0])))))) {
-        SXEL2("Failed to allocate %zu bytes to clone an object", (len + 1) * sizeof(jitson->index[0]));
-        return false;
+        if (!(clone->index = MOCKFAIL(MOCK_FAIL_OBJECT_CLONE, NULL, sxe_malloc(size)))) {
+            SXEL2("Failed to allocate %zu bytes to clone an object", (len + 1) * sizeof(jitson->index[0]));
+            return false;
+        }
+
+        SXEA6(clone->type & SXE_JITSON_TYPE_INDEXED, "Clone of object should already be marked indexed");
+        memcpy(clone->index, jitson->index, size);
     }
 
-    clone->type |= SXE_JITSON_TYPE_INDEXED;
-    memcpy(clone->index, jitson->index, size);
-
-    for (i = 0; i < len; i++)                                                   // For each bucket
-        for (index = jitson->index[i]; index; index = jitson[index].link) {     // For each member in the bucket
-            content = &jitson[index];
-            size    = sxe_jitson_size(content);
-
-            if (!(key = sxe_jitson_clone(content, &clone[index])) || !sxe_jitson_clone(content + size, &clone[index + size])) {
-                stop = index;
-
-                /* Free any space allocated for members
-                 */
-                for (i = 0; i < len; i++)                                                  // For each bucket
-                    for (index = jitson->index[i]; index; index = jitson[index].link) {    // For each member in the bucket
-                        if (key)    // If the key was cloned, free it
-                            sxe_jitson_free(&clone[index]);
-
-                        if (index == stop) {
-                            sxe_free(clone->index);
-                            return false;
-                        }
-
-                        sxe_jitson_free(&clone[index + size]);
-                    }
-
-                SXEA1(false, "Clone failed at index %u but it was not found during the unwind", stop);    /* COVERAGE EXCLUSION - Can't happen */
-            }
+    if (!sxe_jitson_object_clone_members(jitson, clone, len)) {
+        if (clone->type & SXE_JITSON_TYPE_INDEXED) {    // If the index was cloned, free it up
+            sxe_free(clone->index);
+            clone->index = NULL;
         }
+
+        return false;
+    }
 
     return true;
 }
@@ -536,7 +559,7 @@ sxe_jitson_type_register_reference(void)
  * Initialize the types and register INVALID (0) and all JSON types: null, bool, number, string, array, object, and pointer.
  *
  * @param mintypes The minimum number of types to preallocate. Should be SXE_JITSON_MIN_TYPES + the number of additional types
- * @param flags    0 for standard JSON or SXE_JITSON_FLAG_ALLOW_HEX to allow hexadecimal unsigned integers
+ * @param flags    0 for standard JSON or SXE_JITSON_FLAG_ALLOW_HEX to allow hexadecimal (and octal) unsigned integers
  */
 void
 sxe_jitson_type_init(uint32_t mintypes, uint32_t flags)
@@ -551,7 +574,7 @@ sxe_jitson_type_init(uint32_t mintypes, uint32_t flags)
     SXEA1(sxe_jitson_type_register_array()     == SXE_JITSON_TYPE_ARRAY,                "Type 5 is 'array'");
     SXEA1(sxe_jitson_type_register_object()    == SXE_JITSON_TYPE_OBJECT,               "Type 6 is 'object'");
     SXEA1(sxe_jitson_type_register_reference() == SXE_JITSON_TYPE_REFERENCE,            "Type 7 is 'reference'");
-    sxe_jitson_flags = flags;
+    sxe_jitson_flags |= flags;
 }
 
 /**
@@ -572,17 +595,22 @@ sxe_jitson_is_init(void)
 }
 
 /**
- * Free a jitson object
+ * Free a jitson object if it was allocated
  *
  * @note All other threads that might access the object must remove their references to it before this function is called,
  *       unless all just in time operations (i.e. string length of a referenced string, construction of indeces) can be
  *       guaranteed to have already happened.
  */
 void
-sxe_jitson_free(struct sxe_jitson *jitson)
+sxe_jitson_free(const struct sxe_jitson *jitson)
 {
-    if (jitson)
-        types[jitson->type & SXE_JITSON_TYPE_MASK].free(jitson);
+    if (jitson && (jitson->type & SXE_JITSON_TYPE_ALLOCED)) {    // If it was allocated, it's safe to free it
+        struct sxe_jitson *mutable = SXE_CAST_NOCONST(struct sxe_jitson *, jitson);
+
+        types[jitson->type & SXE_JITSON_TYPE_MASK].free(mutable);
+        mutable->type = SXE_JITSON_TYPE_INVALID;
+        sxe_free(mutable);
+    }
 }
 
 /**
@@ -604,14 +632,22 @@ sxe_jitson_size(const struct sxe_jitson *jitson)
 }
 
 /**
- * Determine the length of a jitson object. For strings, this is the string length, for collections, the number of members.
+ * Determine whether a jitson supports taking its length
+ */
+bool
+sxe_jitson_supports_len(const struct sxe_jitson *jitson)
+{
+    return types[jitson->type & SXE_JITSON_TYPE_MASK].len != NULL;
+}
+
+/**
+ * Determine the length of a jitson value. For strings, this is the string length, for collections, the number of members.
  */
 size_t
 sxe_jitson_len(const struct sxe_jitson *jitson)
 {
-    uint32_t type = jitson->type & SXE_JITSON_TYPE_MASK;
-    SXEA1(types[type].len, "%s:Type %s does not support taking its length", __func__,  sxe_jitson_type_to_str(type));
-    return types[type].len(jitson);
+    SXEA1(sxe_jitson_supports_len(jitson), "Type %s does not support taking its length", sxe_jitson_get_type_as_str(jitson));
+    return types[jitson->type & SXE_JITSON_TYPE_MASK].len(jitson);
 }
 
 bool

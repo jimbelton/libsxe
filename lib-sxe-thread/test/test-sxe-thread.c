@@ -88,7 +88,7 @@ main(void)
     SXE_RETURN result;
     unsigned   i;
 
-    plan_tests(6);
+    plan_tests(7);
     sxe_log_hook_line_out(test_log_line);
     test_log_level = sxe_log_set_level(SXE_LOG_LEVEL_TRACE);    /* Required to do indentation test */
     sxe_spinlock_construct(&ping);
@@ -110,5 +110,6 @@ main(void)
     is(sxe_spinlock_take(&pong), SXE_SPINLOCK_STATUS_TAKEN, "Pong lock taken by main");
     ok(main_indent > 0,                                     "Main log indent set to %u", main_indent);
     ok(thread_indent > main_indent,                         "Thread indent is greater than main indent");
+    ok(sxe_thread_get_self(),                               "A thread can always get its self");
     return exit_status();
 }

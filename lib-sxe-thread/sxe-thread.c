@@ -24,8 +24,11 @@
 
 #include "sxe-thread.h"
 
+/**
+ * OS independant thread creation
+ */
 SXE_RETURN
-sxe_thread_create(SXE_THREAD * thread, SXE_THREAD_RETURN (SXE_STDCALL * thread_main)(void *), void * user_data, unsigned options)
+sxe_thread_create(SXE_THREAD *thread, SXE_THREAD_RETURN (SXE_STDCALL * thread_main)(void *), void * user_data, unsigned options)
 {
     SXE_RETURN result = SXE_RETURN_ERROR_INTERNAL;
     int        error;
@@ -54,14 +57,51 @@ sxe_thread_create(SXE_THREAD * thread, SXE_THREAD_RETURN (SXE_STDCALL * thread_m
         goto SXE_EARLY_OUT;
     }
 
-    switch (error) {                                                                                             /* Coverage Exclusion - Failure case */
+    switch (error) {                                                                                            /* Coverage Exclusion - Failure case */
     case EAGAIN: SXEL2("sxe_thread_create: Not enough resources to create a thread");                 break;    /* Coverage Exclusion - Failure case */
     default:     SXEL2("sxe_thread_create: Unexpected error creating a thread: %s", strerror(error)); break;    /* Coverage Exclusion - Failure case */
     }
-
 #endif
 
 SXE_EARLY_OUT:
     SXER6("return %s", sxe_return_to_string(result));
     return result;
+}
+
+/**
+ * Wait for a thread to terminate
+ *
+ * @param thread     A thread created with sxe_thread_create
+ * @param retval_out Pointer to a location to store the thread's return value or NULL
+ *
+ * @return SXE_RETURN_OK, SXE_RETURN_NO_SUCH_PROCESS, SXE_RETURN_ERROR_INVALID, or SXE_RETURN_DEADLOCK_WOULD_OCCUR
+ *
+ * @note Currently, there is no WIN32 (visual C) implementation
+ */
+SXE_RETURN
+sxe_thread_wait(SXE_THREAD thread, SXE_THREAD_RETURN *retval_out)
+{
+    SXE_THREAD_RETURN retval;
+
+    return pthread_join(thread, retval_out ?: &retval);
+}
+
+SXE_THREAD
+sxe_thread_get_self(void)
+{
+    return pthread_self();
+}
+
+/**
+ * Yeild the processor to other threads
+ *
+ * @note Under Linux, pthread_yield can lead to deadlocks with the standard scheduler, so nanosleep must be used.  Currently,
+ *       there is no WIN32 (visual C) implementation.
+ */
+void
+sxe_thread_yeild(void)
+{
+    struct timespec request = {0, 0};
+
+    nanosleep(&request, NULL);
 }
